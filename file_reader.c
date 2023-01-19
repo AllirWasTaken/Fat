@@ -6,6 +6,9 @@
 #include <memory.h>
 #include <string.h>
 
+//#include "SmartPointers.h"
+
+
 
 struct disk_t *disk_open_from_file(const char *volume_file_name) {
     if (!volume_file_name) {
@@ -72,15 +75,18 @@ struct volume_t *fat_open(struct disk_t *pdisk, uint32_t first_sector) {
 
     struct volume_t *result = malloc(sizeof(struct volume_t));
     if (!result) {
+        free(result);
         errno = ENOMEM;
         return NULL;
     }
 
     if (disk_read(pdisk, (int) first_sector, &result->fatInfo, 1) == -1) {
+        free(result);
         return NULL;
     }
 
     if (result->fatInfo.signature != 0xaa55) {
+        free(result);
         errno = EINVAL;
         return NULL;
     }
@@ -165,7 +171,7 @@ struct clusters_chain_t *get_chain_fat12(void *buffer, size_t size, uint16_t fir
 
     for (uint16_t next = first_cluster; result->size < numberOfCluster + 2;) {
         next = TableValue(next, buffer);
-        if (next == FAT12_END) {
+        if (next > FAT12_END_BEG&&next<FAT12_END_END){
             break;
         }
         if (next >= numberOfCluster || result->size > numberOfCluster) {
@@ -210,7 +216,7 @@ struct file_t *file_open(struct volume_t *pvolume, const char *file_name) {
     int found = 0;
 
 
-    char fixedName[11];
+    char fixedName[11]={' '};
 
     {
 
@@ -298,6 +304,8 @@ int file_close(struct file_t *stream) {
         return -1;
     }
 
+
+    free(stream->fatChain->clusters);
     free(stream->fatChain);
     free(stream);
     return 0;
@@ -309,7 +317,7 @@ int GetFileCluster(struct file_t *stream, void *buffer, int clusterNumber) {
     sectorNumber+=stream->fat->fatInfo.size_of_reserved_area;
     sectorNumber+=stream->fat->fatInfo.size_of_fat*stream->fat->fatInfo.number_of_fats;
     sectorNumber+=stream->fat->fatInfo.maximum_number_of_files*(int)sizeof(struct SFN)/stream->fat->fatInfo.bytes_per_sector;
-    sectorNumber+=(stream->fatChain->clusters[clusterNumber]-2)*2;
+    sectorNumber+=(stream->fatChain->clusters[clusterNumber]-2)*stream->fat->fatInfo.sectors_per_clusters;
     if (disk_read(stream->fat->disk, sectorNumber, buffer,
                   stream->fat->fatInfo.sectors_per_clusters) == -1) {
         errno = ERANGE;
@@ -343,7 +351,7 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream) {
 
 
     while (1) {
-        if (stream->pos + size >= stream->fileInfo.size||elementCounter==nmemb) {
+        if (stream->pos + size >= stream->fileInfo.size||elementCounter==(int)nmemb) {
             break;
         }
 

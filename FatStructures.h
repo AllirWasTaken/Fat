@@ -2,7 +2,8 @@
 #define FAT_STRUCTURES_H
 
 #define FAT16_END 65528
-#define FAT12_END 4090
+#define FAT12_END_BEG 0xff8
+#define FAT12_END_END 0xfff
 
 #include <stdint.h>
 #include <stddef.h>
