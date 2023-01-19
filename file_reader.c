@@ -171,7 +171,7 @@ struct clusters_chain_t *get_chain_fat12(void *buffer, size_t size, uint16_t fir
 
     for (uint16_t next = first_cluster; result->size < numberOfCluster + 2;) {
         next = TableValue(next, buffer);
-        if (next > FAT12_END_BEG&&next<FAT12_END_END){
+        if (next >= FAT12_END_BEG&&next<=FAT12_END_END){
             break;
         }
         if (next >= numberOfCluster || result->size > numberOfCluster) {
@@ -200,7 +200,7 @@ struct clusters_chain_t *get_chain_fat12(void *buffer, size_t size, uint16_t fir
 
 struct file_t *file_open(struct volume_t *pvolume, const char *file_name) {
 
-    if (!pvolume) {
+    if (!pvolume||!file_name) {
         errno = EFAULT;
         return NULL;
     }
@@ -216,58 +216,37 @@ struct file_t *file_open(struct volume_t *pvolume, const char *file_name) {
     int found = 0;
 
 
-    char fixedName[11]={' '};
+    char fixedName[11]="           ";
 
     {
 
-        int temp = 0;
-        int check = 0;
+        for(int i=0;i<11;i++){
 
-        for (int i = 0; i < 11; i++) {
-            if (file_name[i] == '.')check = i;
-            if (file_name[i] == '\0') {
-                temp = i;
+
+            if(file_name[i]=='.'){
+                i++;
+                for(int z=8;z<11;z++,i++){
+                    if(file_name[i]=='\0'){
+                        break;
+                    }
+                    fixedName[z]=file_name[i];
+                }
                 break;
             }
-        }
-
-        int extLength = temp - check - 1;
-
-
-        int i;
-        for (i = 0; i < check; i++) {
-            fixedName[i] = file_name[i];
-        }
-
-        if (check) {
-            for (i = 0; i < check; i++) {
-                fixedName[i] = file_name[i];
+            else if(file_name[i]=='\0'){
+                break;
             }
+            fixedName[i]=file_name[i];
 
-            for (; i < 8; i++) {
-                fixedName[i] = ' ';
-            }
-
-            for (int z = 0; z < extLength; z++, i++, check++) {
-                fixedName[i] = file_name[check + 1];
-            }
-
-        } else {
-            for (i = 0; i < temp; i++) {
-                fixedName[i] = file_name[i];
-            }
-        }
-
-        for (; i < 11; i++) {
-            fixedName[i] = ' ';
         }
 
     }
 
     for (unsigned i = 0; i < pvolume->fatInfo.maximum_number_of_files; i++) {
         if (CompareFatWords(rootDirectory->filename, fixedName) == 0) {
-            if (rootDirectory->file_attributes == 212) {
+            if ((rootDirectory->file_attributes & ( 1 << 4 )) >> 4 == 1) {
                 errno = EISDIR;
+                free(result);
                 return NULL;
             }
             found = 1;
@@ -280,6 +259,7 @@ struct file_t *file_open(struct volume_t *pvolume, const char *file_name) {
 
     if (found == 0) {
         errno = ENOENT;
+        free(result);
         return NULL;
     }
 
@@ -351,7 +331,7 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream) {
 
 
     while (1) {
-        if (stream->pos + size >= stream->fileInfo.size||elementCounter==(int)nmemb) {
+        if (stream->pos + (unsigned)1 > stream->fileInfo.size||elementCounter==(int)nmemb) {
             break;
         }
 
@@ -402,13 +382,118 @@ int32_t file_seek(struct file_t *stream, int32_t offset, int whence) {
 
 
 struct dir_t *dir_open(struct volume_t *pvolume, const char *dir_path) {
-    return NULL;
+
+    if(!pvolume||!dir_path){
+        errno=EFAULT;
+        return NULL;
+    }
+
+    struct dir_t *result=malloc(sizeof(struct dir_t));
+    if(!result){
+        errno=ENOMEM;
+        return NULL;
+    }
+
+    if(strcmp("\\",dir_path)){
+        free(result);
+        errno=ENOENT;
+        return NULL;
+    }
+
+    result->pos=0;
+    result->size=pvolume->fatInfo.maximum_number_of_files;
+    result->dirData=pvolume->rootDirectory;
+    result->readEmptyFiles=0;
+
+    return result;
 }
 
 int dir_read(struct dir_t *pdir, struct dir_entry_t *pentry) {
+
+    if(!pdir||!pentry){
+        errno=EFAULT;
+        return -1;
+    }
+
+
+
+
+    int found=0;
+    struct SFN *directory=pdir->dirData;
+    for(;pdir->pos<pdir->size;){
+
+        if(directory[pdir->pos].filename[0]!=0x0&&directory[pdir->pos].filename[0]!=(char)0xe5){
+            if((directory[pdir->pos].size!=0&&pdir->readEmptyFiles==0)||(pdir->readEmptyFiles&&directory[pdir->pos].size==0)) {
+                if (((directory[pdir->pos].file_attributes & (1 << 3)) >> 3) != 1) {
+                    found = 1;
+                }
+            }
+        }
+        pdir->pos++;
+        if(pdir->pos==pdir->size){
+            if(pdir->readEmptyFiles==0){
+                pdir->readEmptyFiles=1;
+                pdir->pos=0;
+            }
+        }
+        if(found){
+            break;
+        }
+    }
+    if(!found){
+        return 1;
+    }
+
+
+    directory+=pdir->pos-1;
+
+    pentry->size=directory->size;
+
+    {
+        int fi=0;
+        for(int i=0;i<11;i++,fi++){
+            if(directory->filename[i]==' '||(i==8&&directory->filename[i+1]!=' ')){
+                if((i==8&&directory->filename[i+1]!=' '))i--;
+                for(int z=i+1;z<11;z++){
+                    if(directory->filename[z]!=' '){
+                        pentry->name[fi]='.';
+                        fi++;
+                        for(int j=z;j<11;j++){
+                            if(directory->filename[j]==' ')break;
+                            pentry->name[fi]=directory->filename[j];
+                            fi++;
+                        }
+                        break;
+                    }
+                }
+                break;
+            }
+            pentry->name[fi]=directory->filename[i];
+        }
+        pentry->name[fi]='\0';
+    }
+
+
+    pentry->is_archived= ((directory->file_attributes & ( 1 << 5 )) >> 5)==1;
+    pentry->is_directory= ((directory->file_attributes & ( 1 << 4 )) >> 4)==1;
+    pentry->is_hidden= ((directory->file_attributes & ( 1 << 1 )) >> 1)==1;
+    pentry->is_readonly= ((directory->file_attributes & ( 1 << 0 )) >> 0)==1;
+    pentry->is_system= ((directory->file_attributes & ( 1 << 2 )) >> 2)==1;
+
+
+
+
+
+
     return 0;
 }
 
 int dir_close(struct dir_t *pdir) {
+    if(!pdir){
+        errno=EFAULT;
+        return -1;
+    }
+    free(pdir);
+
     return 0;
 }

@@ -38,12 +38,20 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream);
 int32_t file_seek(struct file_t* stream, int32_t offset, int whence);
 
 struct dir_t{
-    int i;
+    void *dirData;
+    int size;
+    int pos;
+    int readEmptyFiles;
 };
 
 struct dir_entry_t{
-    int i;
-    char *name;
+    char name[13];
+    size_t size;
+    int is_archived;
+    int is_readonly;
+    int is_system;
+    int is_hidden;
+    int is_directory;
 };
 struct dir_t* dir_open(struct volume_t* pvolume, const char* dir_path);
 int dir_read(struct dir_t* pdir, struct dir_entry_t* pentry);

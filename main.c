@@ -8,18 +8,22 @@
 int main() {
 
     struct disk_t *disk= disk_open_from_file("../fat12test.img");
-    struct volume_t *fatAf= fat_open(disk,0);
+    struct volume_t *volume= fat_open(disk,0);
 
 
 
-    struct file_t *fileH=file_open(fatAf,"SHEET.BIN");
+    struct dir_t* pdir = dir_open(volume, "\\");
 
-    char data[5000];
+    struct dir_entry_t entry;
 
-    file_read(data,1,1667,fileH);
+    for (int i = 0; i < 13; ++i) {
+        dir_read(pdir, &entry);
+        printf("%s\n",entry.name);
+    }
 
-    file_close(fileH);
-    fat_close(fatAf);
+
+    dir_close(pdir);
+    fat_close(volume);
     disk_close(disk);
 
 
